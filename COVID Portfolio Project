@@ -1,0 +1,135 @@
+SELECT *
+FROM PortfolioProject..CovidDeathsCSV
+WHERE continent IS NOT NULL
+ORDER BY 3,4
+
+-- SELECT *
+-- FROM PortfolioProject..CovidVaccinationsCSV
+-- ORDER BY 3,4
+
+-- Select the data that we are going to be using
+
+SELECT location, date, total_cases, new_cases, total_deaths, population
+FROM PortfolioProject..CovidDeathsCSV
+ORDER BY 1,2
+
+-- Looking at Total Cases vs Total Deaths
+-- Shows likelihood of dying if you contract COVID in your country
+SELECT location, date, total_cases, total_deaths, (total_deaths/total_cases)*100 AS DeathPercentage
+FROM PortfolioProject..CovidDeathsCSV
+WHERE location like '%states%'
+ORDER BY 1,2
+
+-- Looking at Total Cases vs Population
+-- Shows what percentage of population has contracted COVID
+SELECT location, date, population, total_cases, (total_cases/population)*100 AS InfectionRate
+FROM PortfolioProject..CovidDeathsCSV
+WHERE location like '%states%'
+ORDER BY 1,2
+
+-- Looking at countries with highest infection rate compared to population
+SELECT location, population, MAX(total_cases) as HighestInfectionCount, MAX((total_cases/population))*100 AS InfectionRate
+FROM PortfolioProject..CovidDeathsCSV
+--WHERE location like '%states%'
+GROUP BY population, location
+ORDER BY InfectionRate DESC
+
+-- Showing the countries with the highest death count per population
+SELECT location, MAX(cast(total_deaths as int)) AS TotalDeathCount
+FROM PortfolioProject..CovidDeathsCSV
+WHERE continent IS NOT NULL
+GROUP BY location
+ORDER BY TotalDeathCount DESC
+
+-- Breaking things down by continent
+-- Showing continents with the highest death count
+SELECT continent, MAX(cast(total_deaths as int)) AS TotalDeathCount
+FROM PortfolioProject..CovidDeathsCSV
+WHERE continent IS NOT NULL
+GROUP BY continent
+ORDER BY TotalDeathCount DESC
+
+-- GLOBAL NUMBERS
+
+SELECT SUM(new_cases) AS TotalCases, SUM(new_deaths) AS TotalDeaths, SUM(new_deaths)/SUM(new_cases)*100 AS DeathPercentage
+FROM PortfolioProject..CovidDeathsCSV
+WHERE continent IS NOT NULL
+ORDER BY 1,2
+
+-- Joining COVID Deaths data with COVID Vaccinations data
+-- Looking at Total Population vs Vaccinations
+SELECT dea.continent, dea.location, dea.date, dea.population, vac.new_vaccinations, 
+SUM(vac.new_vaccinations) OVER (PARTITION BY dea.location ORDER BY dea.location, dea.date) AS TotalVaxxedRollingCount,
+(TotalVaxxedRollingCount/population)*100
+FROM PortfolioProject..CovidDeathsCSV dea
+JOIN PortfolioProject..CovidVaccinationsCSV vac
+    ON dea.location = vac.location
+    AND dea.date = vac.date
+WHERE dea.continent IS NOT NULL
+ORDER BY 2,3
+
+-- USE CTE to show the rolling count and percent of people vaccinated
+
+WITH PopvsVac (continent, location, date, population, new_vaccinations, RollingPeopleVaccinated) 
+AS
+(
+    SELECT dea.continent, dea.location, dea.date, dea.population, vac.new_vaccinations, 
+SUM(vac.new_vaccinations) OVER (PARTITION BY dea.location ORDER BY dea.location, dea.date) AS RollingPeopleVaccinated
+FROM PortfolioProject..CovidDeathsCSV dea
+JOIN PortfolioProject..CovidVaccinationsCSV vac
+    ON dea.location = vac.location
+    AND dea.date = vac.date
+WHERE dea.continent IS NOT NULL
+)
+SELECT *, (RollingPeopleVaccinated/population)*100 AS RollingPercentVaccinated
+FROM PopvsVac
+
+-- TEMP TABLE
+
+DROP TABLE IF EXISTS #PercentPopulationVaccinated
+CREATE TABLE #PercentPopulationVaccinated
+(
+Continent NVARCHAR(255),
+Location NVARCHAR(255),
+Date DATETIME,
+Population NUMERIC,
+New_vaccinations NUMERIC,
+RollingPeopleVaccinated NUMERIC
+)
+
+INSERT INTO #PercentPopulationVaccinated
+SELECT dea.continent, dea.location, dea.date, dea.population, vac.new_vaccinations, 
+SUM(vac.new_vaccinations) OVER (PARTITION BY dea.location ORDER BY dea.location, dea.date) AS RollingPeopleVaccinated
+FROM PortfolioProject..CovidDeathsCSV dea
+JOIN PortfolioProject..CovidVaccinationsCSV vac
+    ON dea.location = vac.location
+    AND dea.date = vac.date
+WHERE dea.continent IS NOT NULL
+
+SELECT *, (RollingPeopleVaccinated/population)*100 AS RollingPercentVaccinated
+FROM #PercentPopulationVaccinated
+
+-- Creating view to store for later data visualizations
+
+-- Drop the existing view if it exists
+DROP VIEW IF EXISTS PercentPopulationVaccinated;
+GO
+
+-- Now create the view in a separate batch
+CREATE VIEW PercentPopulationVaccinated AS
+SELECT 
+    dea.continent, 
+    dea.location, 
+    dea.date, 
+    dea.population, 
+    vac.new_vaccinations, 
+    SUM(vac.new_vaccinations) OVER (PARTITION BY dea.location ORDER BY dea.location, dea.date) AS RollingPeopleVaccinated
+FROM 
+    PortfolioProject..CovidDeathsCSV dea
+JOIN 
+    PortfolioProject..CovidVaccinationsCSV vac
+    ON dea.location = vac.location
+    AND dea.date = vac.date
+WHERE 
+    dea.continent IS NOT NULL;
+GO
